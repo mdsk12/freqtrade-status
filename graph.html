@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradeSk — ট্রেড গ্রাফ</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Noto Sans Bengali", sans-serif;
+    background: linear-gradient(135deg, #10131F, #1C1A10 50%, #0B0F1A); color: #fff; min-height: 100vh; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 24px; margin: 4px 0 2px; }
+  .sub { color: #8A8A9A; font-size: 13px; margin-bottom: 16px; }
+  .card { background: rgba(255,255,255,.06); border: 1px solid rgba(212,175,55,.25);
+    border-radius: 20px; padding: 16px; margin-top: 12px; }
+  .card h2 { font-size: 17px; margin: 0 0 10px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat { flex: 1 1 140px; background: rgba(255,255,255,.07); border-radius: 14px; padding: 12px; }
+  .stat .k { color: #B8B8C8; font-size: 12px; }
+  .stat .v { font-size: 19px; font-weight: 700; margin-top: 4px; }
+  .green { color: #4CAF50; } .red { color: #FF5252; } .gold { color: #D4AF37; }
+  svg { width: 100%; height: auto; display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); text-align: left; }
+  th { color: #8A8A9A; font-weight: 600; }
+  .badge { display: inline-block; background: rgba(255,255,255,.12); border-radius: 8px; padding: 2px 8px; font-size: 12px; }
+  .foot { color: #6E7082; font-size: 12px; margin-top: 16px; text-align: center; }
+  .live { color: #4CAF50; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🤖 SK Strategy — ট্রেড গ্রাফ</h1>
+  <div class="sub">পেপার ট্রেডিং (Dry-Run) — আসল টাকা নয় • <span id="upd">লোড হচ্ছে…</span> <span id="liveTag"></span></div>
+
+  <div class="card">
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <div class="card">
+    <h2>📈 ওয়ালেট (প্রতি ট্রেডের পর)</h2>
+    <svg id="walletChart" viewBox="0 0 600 240" role="img" aria-label="Wallet chart"></svg>
+  </div>
+
+  <div class="card">
+    <h2>💰 প্রতি ট্রেডের লাভ/ক্ষতি (USD)</h2>
+    <svg id="pnlChart" viewBox="0 0 600 240" role="img" aria-label="PnL chart"></svg>
+  </div>
+
+  <div class="card">
+    <h2>📋 বন্ধ ট্রেড</h2>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>#</th><th>পেয়ার</th><th>দিক</th><th>এন্ট্রি → এক্সিট</th><th>PnL</th><th>Exit</th><th>বন্ধ</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="foot">ডেটা: status.json (GitHub) • পেজটি প্রতি ৬০ সেকেন্ডে নিজে থেকে রিফ্রেশ হয়</div>
+</div>
+
+<script>
+// Snapshot (2026-11-10 19:37 Dhaka) — live fetch ব্যর্থ হলে এটাই দেখাবে।
+const SNAPSHOT = {
+  "wallet_usdt": 999.6, "total_profit_usdt": -0.4,
+  "updated_at_dhaka": "2026-11-10 19:37:10",
+  "trades": [
+    {"id":1,"pair":"SOL/USDT","is_short":false,"leverage":1,"open_rate":85.5,"close_rate":86.67,"open_dhaka":"2026-11-09 13:25:04","close_dhaka":"2026-11-09 14:51:23","profit_abs_usdt":0.31,"profit_pct":1.05,"exit_reason":"roi"},
+    {"id":2,"pair":"SOL/USD:USD","is_short":false,"leverage":5,"open_rate":85.69,"close_rate":85.22,"open_dhaka":"2026-11-10 14:47:23","close_dhaka":"2026-11-10 15:01:21","profit_abs_usdt":-0.93,"profit_pct":-3.1,"exit_reason":"stop_loss"},
+    {"id":3,"pair":"SOL/USD:USD","is_short":false,"leverage":5,"open_rate":85.11,"close_rate":85.4,"open_dhaka":"2026-11-10 15:10:03","close_dhaka":"2026-11-10 15:17:38","profit_abs_usdt":0.41,"profit_pct":1.35,"exit_reason":"roi"},
+    {"id":4,"pair":"SOL/USD:USD","is_short":false,"leverage":5,"open_rate":84.6,"close_rate":84.27,"open_dhaka":"2026-11-10 16:35:03","close_dhaka":"2026-11-10 16:45:58","profit_abs_usdt":-0.69,"profit_pct":-2.3,"exit_reason":"stop_loss"},
+    {"id":5,"pair":"SOL/USD:USD","is_short":false,"leverage":5,"open_rate":84.07,"close_rate":84.41,"open_dhaka":"2026-11-10 19:35:03","close_dhaka":"2026-11-10 19:36:43","profit_abs_usdt":0.5,"profit_pct":1.67,"exit_reason":"roi"}
+  ]
+};
+
+const fmt = n => (n >= 0 ? "+" : "") + n.toFixed(2);
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+function render(j, live) {
+  const trades = (j.trades || []).slice().sort((a, b) => a.id - b.id);
+  const wallet = j.wallet_usdt, profit = j.total_profit_usdt;
+  const wins = trades.filter(t => t.profit_abs_usdt > 0).length;
+  const losses = trades.filter(t => t.profit_abs_usdt < 0).length;
+  const best = trades.length ? Math.max(...trades.map(t => t.profit_abs_usdt)) : 0;
+  const worst = trades.length ? Math.min(...trades.map(t => t.profit_abs_usdt)) : 0;
+  const winRate = trades.length ? Math.round(wins * 100 / trades.length) : 0;
+
+  document.getElementById("upd").textContent =
+    "শেষ আপডেট: " + (j.updated_at_dhaka || "—") + " (ঢাকা সময়)";
+  document.getElementById("liveTag").textContent = live ? " • ● লাইভ" : "";
+  document.getElementById("liveTag").className = live ? "live" : "";
+
+  document.getElementById("stats").innerHTML = [
+    ["ওয়ালেট", wallet.toFixed(2) + " USD", ""],
+    ["মোট PnL", fmt(profit) + " USD", profit >= 0 ? "green" : "red"],
+    ["মোট ট্রেড", trades.length + " • জয় " + wins + " • হার " + losses, ""],
+    ["জয়ের হার", winRate + "%", winRate >= 50 ? "green" : "gold"],
+    ["সেরা ট্রেড", fmt(best) + " USD", "green"],
+    ["সবচেয়ে খারাপ", fmt(worst) + " USD", "red"]
+  ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("");
+
+  // Wallet curve: start 1000, then cumulative after each trade.
+  const pts = [1000];
+  trades.forEach(t => pts.push(pts[pts.length - 1] + t.profit_abs_usdt));
+  drawLine(document.getElementById("walletChart"), pts,
+    ["শুরু"].concat(trades.map(t => "#" + t.id)));
+
+  // PnL bars.
+  drawBars(document.getElementById("pnlChart"),
+    trades.map(t => t.profit_abs_usdt), trades.map(t => "#" + t.id));
+
+  document.getElementById("tbody").innerHTML = trades.slice().reverse().map(t => {
+    const p = t.profit_abs_usdt;
+    const side = t.is_short ? "🔴 SHORT" : "🟢 LONG";
+    return `<tr><td>#${t.id}</td><td>${esc(t.pair)}</td><td>${side} ${t.leverage || ""}x</td>` +
+      `<td>$${t.open_rate} ➔ $${t.close_rate}</td>` +
+      `<td class="${p >= 0 ? "green" : "red"}"><b>${fmt(p)} (${fmt(t.profit_pct)}%)</b></td>` +
+      `<td><span class="badge">${esc(t.exit_reason)}</span></td>` +
+      `<td>${esc((t.close_dhaka || "").slice(5, 16))}</td></tr>`;
+  }).join("");
+}
+
+function drawLine(svg, vals, labels) {
+  const W = 600, H = 240, P = 34, B = 26;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const pad = Math.max((max - min) * 0.25, 0.3);
+  const lo = min - pad, hi = max + pad;
+  const X = i => P + i * (W - 2 * P) / (vals.length - 1);
+  const Y = v => (H - B) - (v - lo) / (hi - lo) * (H - B - P);
+  let s = "";
+  // gridlines + y labels
+  [lo, (lo + hi) / 2, hi].forEach(v => {
+    s += `<line x1="${P}" y1="${Y(v)}" x2="${W - P}" y2="${Y(v)}" stroke="rgba(255,255,255,.08)"/>` +
+      `<text x="6" y="${Y(v) + 4}" fill="#8A8A9A" font-size="11">$${v.toFixed(2)}</text>`;
+  });
+  const line = vals.map((v, i) => (i ? "L" : "M") + X(i).toFixed(1) + "," + Y(v).toFixed(1)).join(" ");
+  const area = line + ` L${X(vals.length - 1).toFixed(1)},${H - B} L${X(0).toFixed(1)},${H - B} Z`;
+  s += `<path d="${area}" fill="rgba(212,175,55,.10)"/>`;
+  s += `<path d="${line}" fill="none" stroke="#D4AF37" stroke-width="2.5"/>`;
+  vals.forEach((v, i) => {
+    s += `<circle cx="${X(i)}" cy="${Y(v)}" r="4" fill="#0B0F1A" stroke="#D4AF37" stroke-width="2"/>` +
+      `<text x="${X(i)}" y="${Y(v) - 10}" fill="#fff" font-size="11" text-anchor="middle">$${v.toFixed(2)}</text>` +
+      `<text x="${X(i)}" y="${H - 8}" fill="#8A8A9A" font-size="11" text-anchor="middle">${labels[i]}</text>`;
+  });
+  svg.innerHTML = s;
+}
+
+function drawBars(svg, vals, labels) {
+  const W = 600, H = 240, P = 34, B = 26;
+  const maxA = Math.max(...vals.map(Math.abs), 0.5);
+  const zeroY = P + (H - B - P) / 2;
+  const scale = (H - B - P) / 2 / maxA;
+  const bw = Math.min(64, (W - 2 * P) / vals.length * 0.55);
+  let s = `<line x1="${P}" y1="${zeroY}" x2="${W - P}" y2="${zeroY}" stroke="rgba(255,255,255,.25)"/>`;
+  vals.forEach((v, i) => {
+    const cx = P + (i + 0.5) * (W - 2 * P) / vals.length;
+    const h = Math.abs(v) * scale;
+    const y = v >= 0 ? zeroY - h : zeroY;
+    s += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(h, 2).toFixed(1)}" rx="6" fill="${v >= 0 ? "#26A69A" : "#EF5350"}"/>` +
+      `<text x="${cx}" y="${(v >= 0 ? y - 6 : y + h + 14).toFixed(1)}" fill="${v >= 0 ? "#4CAF50" : "#FF5252"}" font-size="12" font-weight="bold" text-anchor="middle">${fmt(v)}</text>` +
+      `<text x="${cx}" y="${H - 8}" fill="#8A8A9A" font-size="11" text-anchor="middle">${labels[i]}</text>`;
+  });
+  svg.innerHTML = s;
+}
+
+async function load() {
+  render(SNAPSHOT, false);
+  const urls = ["status.json?t=" + Date.now(),
+    "https://raw.githubusercontent.com/mdsk12/freqtrade-status/main/status.json?t=" + Date.now()];
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { cache: "no-store" });
+      if (r.ok) { render(await r.json(), true); return; }
+    } catch (e) { /* try next */ }
+  }
+}
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
